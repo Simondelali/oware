@@ -12,71 +12,91 @@ import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 export function RealPitBoard() {
   const { board, stores, currentPlayer, isGameOver, isAIThinking, makeMove } = useGameStore();
   const { scene } = useThree();
-  const boardRef = useRef<THREE.Mesh | null>(null);
   const [boardMesh, setBoardMesh] = useState<THREE.Mesh | null>(null);
   const [hoveredPit, setHoveredPit] = useState<number | null>(null);
 
   useEffect(() => {
-    if (boardRef.current) {
-      scene.remove(boardRef.current);
-      boardRef.current.geometry.dispose();
-      if (Array.isArray(boardRef.current.material)) {
-        boardRef.current.material.forEach(m => m.dispose());
-      } else {
-        boardRef.current.material.dispose();
-      }
-    }
+    // === WOOD TEXTURE ===
+    const textureLoader = new THREE.TextureLoader();
+    const woodTexture = textureLoader.load('/wood.jpg'); // Put a real wood texture in public/wood.jpg
+    woodTexture.wrapS = woodTexture.wrapT = THREE.RepeatWrapping;
+    woodTexture.repeat.set(8, 4);
 
-    const boardBrush = new Brush(new THREE.BoxGeometry(22, 2.4, 13));
-    boardBrush.material = new THREE.MeshStandardMaterial({
+    const normalMap = textureLoader.load('/wood-normal.jpg'); // Optional: add normal map
+    normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.repeat.set(8, 4);
+
+    // === BOARD BRUSH ===
+    const boardGeometry = new THREE.BoxGeometry(24, 3, 14);
+    const boardMaterial = new THREE.MeshStandardMaterial({
+      map: woodTexture,
+      normalMap: normalMap,
+      roughness: 0.8,
+      metalness: 0.1,
       color: '#8B6F47',
-      roughness: 0.9,
     });
+
+    const boardBrush = new Brush(boardGeometry, boardMaterial);
+    boardBrush.castShadow = true;
+    boardBrush.receiveShadow = true;
 
     const evaluator = new Evaluator();
     evaluator.attributes = ['position', 'normal', 'uv'];
 
-    const pitCutter = new Brush(new THREE.CylinderGeometry(1.5, 1.5, 3, 32));
-    const storeCutter = new Brush(new THREE.CylinderGeometry(2.4, 2.4, 4, 32));
+    // === PIT CUTTER (DEEP, ROUND, CARVED) ===
+    const pitGeometry = new THREE.CylinderGeometry(1.6, 1.8, 3.5, 32, 1, false, 0, Math.PI * 2);
+    const pitBrush = new Brush(pitGeometry);
+    pitBrush.position.y = -0.2;
 
+    // === STORE CUTTER (LARGER, DEEP) ===
+    const storeGeometry = new THREE.CylinderGeometry(2.8, 3.0, 4.5, 32);
+    const storeBrush = new Brush(storeGeometry);
+
+    // === PIT POSITIONS ===
     const pitPositions: [number, number, number][] = [];
     for (let i = 0; i < 12; i++) {
       const row = i < 6 ? 1 : 0;
       const col = i < 6 ? i : i - 6;
-      const x = (col - 2.5) * 3.3;
-      const z = row === 0 ? -4.0 : 4.0;
+      const x = (col - 2.5) * 3.6;
+      const z = row === 0 ? -4.6 : 4.6;
       pitPositions.push([x, 0, z]);
     }
 
+    // === CUT PITS ===
     let result = boardBrush;
     pitPositions.forEach(pos => {
-      const cutter = pitCutter.clone();
+      const cutter = pitBrush.clone();
       cutter.position.set(...pos);
       cutter.updateMatrixWorld();
       result = evaluator.evaluate(result, cutter, SUBTRACTION);
     });
 
-    const storePos: [number, number, number][] = [[-11, 0, 0], [11, 0, 0]];
+    // === CUT STORES ===
+    const storePos: [number, number, number][] = [[-12.5, 0, 0], [12.5, 0, 0]];
     storePos.forEach(pos => {
-      const cutter = storeCutter.clone();
+      const cutter = storeBrush.clone();
       cutter.position.set(...pos);
       cutter.updateMatrixWorld();
       result = evaluator.evaluate(result, cutter, SUBTRACTION);
     });
 
-    result.castShadow = true;
-    result.receiveShadow = true;
-    boardRef.current = result;
+    // === ADD WOOD GRAIN TO INNER WALLS ===
+    result.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.material = boardMaterial;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
     setBoardMesh(result);
 
     return () => {
-      if (boardRef.current) {
-        boardRef.current.geometry.dispose();
-        if (Array.isArray(boardRef.current.material)) {
-          boardRef.current.material.forEach(m => m.dispose());
-        } else {
-          boardRef.current.material.dispose();
-        }
+      result.geometry.dispose();
+      if (Array.isArray(result.material)) {
+        result.material.forEach(m => m.dispose());
+      } else {
+        result.material.dispose();
       }
     };
   }, []);
@@ -84,7 +104,6 @@ export function RealPitBoard() {
   const handlePitClick = (index: number) => {
     const isPlayerPit = currentPlayer === 0 && index < 6;
     if (isPlayerPit && board[index] > 0 && !isGameOver && !isAIThinking) {
-      console.log(`CLICKED PIT ${index}`);
       makeMove(index);
     }
   };
@@ -92,17 +111,17 @@ export function RealPitBoard() {
   const getPitPos = (i: number): [number, number, number] => {
     const row = i < 6 ? 1 : 0;
     const col = i < 6 ? i : i - 6;
-    const x = (col - 2.5) * 3.3;
-    const z = row === 0 ? -4.0 : 4.0;
-    return [x, 1.2, z]; // Top of board
+    const x = (col - 2.5) * 3.6;
+    const z = row === 0 ? -4.6 : 4.6;
+    return [x, 1.6, z];
   };
 
   return (
     <group>
-      {/* === CSG BOARD === */}
+      {/* === REALISTIC WOODEN BOARD === */}
       {boardMesh && <primitive object={boardMesh} />}
 
-      {/* === CLICKABLE + HOVER PITS === */}
+      {/* === CLICKABLE PITS (INVISIBLE) === */}
       {board.map((count, i) => {
         const isPlayerPit = currentPlayer === 0 && i < 6;
         const canClick = isPlayerPit && count > 0 && !isGameOver && !isAIThinking;
@@ -110,27 +129,26 @@ export function RealPitBoard() {
 
         return (
           <group key={`pit-${i}`} position={getPitPos(i)}>
-            {/* Invisible Click Mesh */}
             <mesh
               onClick={() => handlePitClick(i)}
               onPointerOver={() => canClick && setHoveredPit(i)}
               onPointerOut={() => setHoveredPit(null)}
               visible={false}
             >
-              <cylinderGeometry args={[1.4, 1.4, 0.1, 32]} />
+              <cylinderGeometry args={[1.5, 1.5, 0.1, 32]} />
               <meshBasicMaterial transparent opacity={0} />
             </mesh>
 
-            {/* Hover Glow */}
+            {/* HOVER GLOW */}
             {canClick && isHovered && (
-              <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                <ringGeometry args={[1.3, 1.6, 32]} />
+              <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[1.4, 1.8, 32]} />
                 <meshStandardMaterial
                   color="#FFD700"
                   emissive="#FFD700"
-                  emissiveIntensity={1.2}
+                  emissiveIntensity={1.5}
                   transparent
-                  opacity={0.9}
+                  opacity={0.8}
                 />
               </mesh>
             )}
@@ -138,60 +156,27 @@ export function RealPitBoard() {
         );
       })}
 
-      {/* === SEEDS IN PITS === */}
+      {/* === SEEDS (DEEP IN PITS) === */}
       {board.map((count, i) => {
         if (count === 0) return null;
         const pos = getPitPos(i);
-        pos[1] = 0; // Inside hole
+        pos[1] = -0.8;
         return (
           <group key={`seeds-${i}`} position={pos}>
-            <SeedPile count={count} baseY={-1.0} />
-            <Html center position={[0, 1.8, 0]}>
-              <div style={{
-                color: '#FFFFFF',
-                fontWeight: 'bold',
-                fontSize: '20px',
-                textShadow: '0 0 6px black',
-                pointerEvents: 'none'
-              }}>
-                {count}
-              </div>
-            </Html>
+            <SeedPile count={count} baseY={-1.4} />
           </group>
         );
       })}
 
       {/* === STORES === */}
       {stores[0] > 0 && (
-        <group position={[-11, 0, 0]}>
-          <SeedPile count={stores[0]} baseY={-1.5} />
-          <Html center position={[0, 3.5, 0]}>
-            <div style={{
-              color: '#FFD700',
-              fontWeight: 'bold',
-              fontSize: '28px',
-              textShadow: '0 0 8px black',
-              pointerEvents: 'none'
-            }}>
-              YOU: {stores[0]}
-            </div>
-          </Html>
+        <group position={[-12.5, -1.2, 0]}>
+          <SeedPile count={stores[0]} baseY={-1.8} />
         </group>
       )}
       {stores[1] > 0 && (
-        <group position={[11, 0, 0]}>
-          <SeedPile count={stores[1]} baseY={-1.5} />
-          <Html center position={[0, 3.5, 0]}>
-            <div style={{
-              color: '#FFD700',
-              fontWeight: 'bold',
-              fontSize: '28px',
-              textShadow: '0 0 8px black',
-              pointerEvents: 'none'
-            }}>
-              AI: {stores[1]}
-            </div>
-          </Html>
+        <group position={[12.5, -1.2, 0]}>
+          <SeedPile count={stores[1]} baseY={-1.8} />
         </group>
       )}
     </group>
